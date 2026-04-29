@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Asistente Académico</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+        }
+        #chat {
+            border: 1px solid #ccc;
+            padding: 15px;
+            height: 420px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+        }
+        .user {
+            color: blue;
+            margin-bottom: 8px;
+        }
+        .bot {
+            color: green;
+            margin-bottom: 16px;
+        }
+        input {
+            width: 320px;
+            padding: 8px;
+        }
+        button {
+            padding: 8px 14px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Asistente Académico</h2>
+
+    <div id="chat"></div>
+
+    <input type="text" id="input" placeholder="Escribí tu pregunta..." />
+    <button onclick="enviar()">Enviar</button>
+
+    <script>
+        const apiBase = "http://127.0.0.1:8000";
+
+        function agregarMensaje(clase, autor, texto) {
+            const chat = document.getElementById("chat");
+            chat.innerHTML += `<div class="${clase}"><b>${autor}:</b> ${texto}</div>`;
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function cargarBienvenida() {
+            try {
+                const res = await fetch(`${apiBase}/`);
+                const data = await res.json();
+                agregarMensaje("bot", "Bot", data.mensaje || "Hola");
+            } catch (error) {
+                agregarMensaje("bot", "Error", "No se pudo conectar con el servidor.");
+                console.error(error);
+            }
+        }
+
+        async function enviar() {
+            const input = document.getElementById("input");
+            const texto = input.value.trim();
+
+            if (!texto) return;
+
+            agregarMensaje("user", "Vos", texto);
+            input.value = "";
+
+            try {
+                const res = await fetch(`${apiBase}/chat?q=${encodeURIComponent(texto)}`);
+                const data = await res.json();
+
+                agregarMensaje("bot", "Bot", data.respuesta || "No hubo respuesta del servidor.");
+            } catch (error) {
+                agregarMensaje("bot", "Error", "Hubo un problema al consultar el bot.");
+                console.error(error);
+            }
+        }
+
+        document.getElementById("input").addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                enviar();
+            }
+        });
+
+        cargarBienvenida();
+    </script>
+</body>
+</html>
