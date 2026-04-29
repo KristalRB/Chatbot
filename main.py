@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import google.generativeai as genai
-import chromadb
 import os
-from sentence_transformers import SentenceTransformer
 
 app = FastAPI()
 
+# CORS (necesario para frontend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,16 +15,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# Configurar Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+# Variables globales (NO cargar al inicio)
+embedder = None
+collection = None
 
-client = chromadb.PersistentClient(path="./db")
-collection = client.get_or_create_collection(name="materias")
 
+def init_db():
+    global embedder, collection
+
+    if embedder is None:
+        print("Inicializando modelo y base de datos...")
+
+        from sentence_transformers import SentenceTransformer
+        import chromadb
+
+        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        client = chromadb.PersistentClient(path="./db")
+        collection = client.get_or_create_collection(name="materias")
+
+        print("Modelo y DB cargados")
+
+
+# Materias
 MATERIAS = {
     "1": "Algoritmos y Estructura de Datos",
     "2": "Base de Datos",
@@ -35,23 +51,10 @@ MATERIAS = {
     "bd": "Base de Datos"
 }
 
-def menu_inicial():
-    return {
-        "mensaje": (
-            "Hola, soy el asistente virtual de las siguientes asignaturas:\n\n"
-            "1. Algoritmos y Estructura de Datos\n"
-            "2. Base de Datos\n\n"
-            "Podés elegir escribiendo el número o el nombre de la materia.\n\n"
-            "Ejemplos:\n"
-            "- 1\n"
-            "- Algoritmos y Estructura de Datos\n"
-            "- 2\n"
-            "- Base de Datos"
-        )
-    }
 
 def detectar_materia(texto: str):
     return MATERIAS.get(texto.strip().lower())
+
 
 def mensaje_bienvenida_materia(nombre_materia: str):
     return {
@@ -67,16 +70,39 @@ def mensaje_bienvenida_materia(nombre_materia: str):
         )
     }
 
+
+# Sirve la web
 @app.get("/")
 def home():
-    return menu_inicial()
+    return FileResponse("index.html")
 
+
+# Endpoint menú
+@app.get("/menu")
+def menu():
+    return {
+        "mensaje": (
+            "Hola, soy el asistente virtual de las siguientes asignaturas:\n\n"
+            "1. Algoritmos y Estructura de Datos\n"
+            "2. Base de Datos\n\n"
+            "Podés elegir escribiendo el número o el nombre de la materia."
+        )
+    }
+
+
+# Endpoint chat
 @app.get("/chat")
 def chat(q: str):
+
+    # Inicializar DB SOLO cuando se usa
+    init_db()
+
+    # Detectar materia
     materia = detectar_materia(q)
     if materia:
         return mensaje_bienvenida_materia(materia)
 
+    # Buscar en base vectorial
     query_embedding = embedder.encode([q]).tolist()[0]
 
     results = collection.query(
@@ -86,10 +112,13 @@ def chat(q: str):
 
     documentos = results.get("documents", [[]])
     contextos = documentos[0] if documentos and len(documentos) > 0 else []
+
     context = "\n\n".join(contextos)
 
+    # Prompt
     prompt = f"""
 Sos un asistente académico.
+
 Respondé solamente usando la información del contexto.
 Si la respuesta no está en el contexto, decí:
 "No encontré esa información en los documentos cargados."
@@ -102,4 +131,5 @@ Pregunta:
 """
 
     response = model.generate_content(prompt)
+
     return {"respuesta": response.text}
